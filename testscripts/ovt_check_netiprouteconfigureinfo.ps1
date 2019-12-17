@@ -1,25 +1,24 @@
 #######################################################################################
 ## Description:
-##   Check guest time sync when disable via the VMware UI (Uncheck "Synchronice clock
-##   with ESXI host"
+##   Check open-vm-tools report NetIpRouteInfo to vSphere APIs
 #######################################################################################
 ## Revision:
-## v1.0 - xinhu - 12/05/2019 - Build script for case ESX-OVT-036.
+## v1.0 - xinhu - 12/06/2019 - Build script for case ESX-OVT-036.
 #######################################################################################
 
 <#
 .Synopsis
-    Check guest time sync when disable via the VMware UI (Uncheck "Synchronice clock with ESXI host")
+    Check open-vm-tools report NetIpRouteInfo to vSphere APIs
     
 .Description
     <test>
-        <testName>ovt_check_time_sync_disable_sync_with_host</testName>
-        <testID>ESX-OVT-036</testID>
-        <testScript>testscripts/ovt_check_time_sync_disable_sync_with_host.ps1</testScript>
+        <testName>ovt_check_netiprouteconfigureinfo</testName>
+        <testID>ESX-OVT-037</testID>
+        <testScript>testscripts/ovt_check_netiprouteconfigureinfo.ps1</testScript>
         <RevertDefaultSnapshot>True</RevertDefaultSnapshot>
         <timeout>1800</timeout>
         <testParams>
-            <param>TC_COVERED=RHEL-173220</param>
+            <param>TC_COVERED=RHEL7-50876</param>
         </testParams>
         <onError>Continue</onError>
         <noReboot>False</noReboot> 
@@ -108,17 +107,6 @@ ConnectToVIServer $env:ENVVISIPADDR `
 ## Main body
 #######################################################################################
 $retVal = $Failed
-# Current version skip the step to uncheck the box of "syncchronize guest time with host"
-# through Vmware UI, because it is a default configure about VMs.
-
-# Function to get the date of VM
-Function Get_date($sshKey,$IP)
-{
-    $date = bin\plink.exe -i ssh\${sshKey} root@${ipv4} "date"
-    Write-host -F Green "INFO: The date of $IP is $date"
-    $year = [int]$($date.split(" "))[-1]
-    return $year
-}
 
 
 # OVT is skipped in RHEL6
@@ -137,22 +125,23 @@ if (-not $vmOut)
     DisconnectWithVIServer
     return $Skipped
 }
-$year_check = Get_date $sshKey ${ipv4}
-$year_set = $year_check+2
-$newdate = [string]$year_set+"0101"
-bin\plink.exe -i ssh\${sshKey} root@${ipv4} "date -s $newdate"
-$res_restvmt = bin\plink.exe -i ssh\${sshKey} root@${ipv4} "systemctl restart vmtoolsd"
-$year_check = Get_date $sshKey ${ipv4}
-if ($year_check -eq $year_set)
+
+bin\plink.exe -i ssh\${sshKey} root@${ipv4} "wget http://sourceforge.net/projects/sshpass/files/latest/download -O sshpass.tar.gz && tar -xvf sshpass.tar.gz && cd sshpass-* && ./configure && make install"
+$vminfo = bin\plink.exe -i ssh\${sshKey} root@${ipv4} "sshpass -p '123qweP' ssh -o StrictHostKeyChecking=no root@$hvServer vim-cmd vmsvc/getallvms | grep $vmName"
+Write-host -F Green "INFO: The item of $vmName is $vminfo"
+Write-output "INFO: The item of $vmName is $vminfo"
+$vmid = $($vminfo.split(" "))[0]
+$res_userinfo = bin\plink.exe -i ssh\${sshKey} root@${ipv4} "sshpass -p '123qweP' ssh -o StrictHostKeyChecking=no root@$hvServer vim-cmd vmsvc/get.guest $vmid | grep IpRouteConfigInfo"
+if ($res_userinfo)
 {
     $retVal = $Passed
-    Write-host -F Green "INFO: Time didnot sync with host after restart vmtoold when disable with host"
-    Write-output "INFO: Time didnot sync with host after restart vmtoold when disable with host"
+    Write-host -F Green "INFO: Find NetIpRouteInfo from host: $res_userinfo"
+    Write-output "INFO: Find NetIpRouteInfo from host: $res_userinfo"
 }
 else
 {
-    Write-host -F Red "ERROR: Time change after restart vmtoold when disable with host, year_check: ${year_check}, year_set: ${year_set}"
-    Write-output "ERROR: Time change after restart vmtoold when disable with host, year_check: ${year_check}, year_set: ${year_set}"
+    Write-host -F Red "ERROR: Didnot find NetIpRouteInfo from host "
+    Write-output "ERROR: Didnot find NetIpRouteInfo from host "
 }
 
 DisconnectWithVIServer
